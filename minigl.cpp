@@ -35,12 +35,73 @@ typedef vec<MGLfloat,4> vec4;   //data structure storing a 4 dimensional vector,
 typedef vec<MGLfloat,3> vec3;   //data structure storing a 3 dimensional vector, see vec.h
 typedef vec<MGLfloat,2> vec2;   //data structure storing a 2 dimensional vector, see vec.h
 
+vec3 color;
+mat4 projection = {{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1}};
+MGLpoly_mode poly_mode;
+
+
+struct Vertex
+{
+    vec4 position;
+    vec3 col;
+
+    Vertex() : position(0, 0, 0, 0), col(0, 0, 0) { }
+    Vertex(MGLfloat x, MGLfloat y, MGLfloat z, MGLfloat w, vec3 c) 
+          : position(x, y, z, w), col(c) { }
+};
+
+vector<Vertex> vertices;
+
+struct Triangle
+{
+    Vertex A, B, C;
+    
+    Triangle(Vertex a, Vertex b, Vertex c) : A(a), B(b), C(c) { }
+};
+
+vector<Triangle> triangles;
+
 /**
  * Standard macro to report errors
  */
 inline void MGL_ERROR(const char* description) {
     printf("%s\n", description);
     exit(1);
+}
+
+
+
+MGLfloat calcArea(vec2 a, vec2 b, vec2 c)
+{
+    return a[0] * (b[1] - c[1]) + a[1] * (c[0] - b[0]) + (b[0] * c[1] - b[1] * c[0]);
+}
+
+void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* data)
+{
+    vec2 a, b, c;
+    a[0] = ((tri.A.position[0] + 1) * width / 2) - .5; 
+    a[1] = ((tri.A.position[1] + 1) * height / 2) - .5; 
+
+    b[0] = ((tri.B.position[0] + 1) * width / 2) - .5; 
+    b[1] = ((tri.B.position[1] + 1) * height / 2) - .5; 
+
+    c[0] = ((tri.C.position[0] + 1) * width / 2) - .5; 
+    c[1] = ((tri.C.position[1] + 1) * height / 2) - .5; 
+
+    for(int i = 0; i < width; i++)
+    {
+        for(int j = 0; j < height; j++)
+        {
+            vec2 p = {i, j};
+            MGLfloat area = calcArea(a, b, c);
+            MGLfloat alpha = calcArea(p, b, c) / area;
+            MGLfloat beta = calcArea(a, p, c) / area;
+            MGLfloat gamma = calcArea(a, b, p) / area;
+
+            if(alpha >= 0 && beta >= 0 && gamma >= 0)
+                data[i+j*width] = Make_Pixel(tri.A.col[0] * 255, tri.A.col[1] * 255, tri.A.col[2] * 255);
+        }
+    }
 }
 
 
@@ -60,6 +121,12 @@ void mglReadPixels(MGLsize width,
                    MGLsize height,
                    MGLpixel *data)
 {
+    Make_Pixel(0, 0, 0);
+
+    for(size_t i = 0; i < triangles.size(); i++)
+       Rasterize_Triangle(triangles[i], width, height, data);
+
+    triangles.clear();
 }
 
 /**
@@ -68,6 +135,7 @@ void mglReadPixels(MGLsize width,
  */
 void mglBegin(MGLpoly_mode mode)
 {
+    poly_mode = mode;
 }
 
 
@@ -76,6 +144,26 @@ void mglBegin(MGLpoly_mode mode)
  */
 void mglEnd()
 {
+    if(poly_mode == MGL_TRIANGLES)
+    {
+        for(size_t i = 0; i < vertices.size(); i += 3)
+        {
+            Triangle t(vertices[i], vertices[i+1], vertices[i+2]);
+            triangles.push_back(t);
+        }
+    }
+    else
+    {
+        for(size_t i = 0; i < vertices.size(); i += 4)
+        {
+            Triangle t1(vertices[i], vertices[i+1], vertices[i+2]);
+            triangles.push_back(t1);
+
+            Triangle t2(vertices[i], vertices[i+2], vertices[i+3]);
+            triangles.push_back(t2);
+        }
+    }
+    vertices.clear();
 }
 
 /**
@@ -87,6 +175,7 @@ void mglEnd()
 void mglVertex2(MGLfloat x,
                 MGLfloat y)
 {
+    mglVertex3(x, y, 0);
 }
 
 /**
@@ -97,6 +186,12 @@ void mglVertex3(MGLfloat x,
                 MGLfloat y,
                 MGLfloat z)
 {
+    vec4 pos = { x, y, z, 1};
+    pos = projection * pos; 
+    
+    Vertex v(0, 0, 0, 0, color);
+    v.position = pos;
+    vertices.push_back(v);
 }
 
 /**
@@ -217,6 +312,14 @@ void mglOrtho(MGLfloat left,
               MGLfloat near,
               MGLfloat far)
 {
+    MGLfloat t_x, t_y, t_z;
+    t_x = -1 * (right + left) / (right - left);
+    t_y = -1 * (top + bottom) / (top - bottom);
+    t_z = -1 * (far + near) / (far - near);
+
+    mat4 temp_matrix = {{ 2 / (right - left), 0, 0, 0, 0, 2 / (top - bottom), 0, 0, 0, 
+                          0, -2 / (far - near), 0, t_x, t_y, t_z, 1}};
+    projection = temp_matrix;   
 }
 
 /**
@@ -226,4 +329,5 @@ void mglColor(MGLfloat red,
               MGLfloat green,
               MGLfloat blue)
 {
+   color = {red, green, blue};
 }
