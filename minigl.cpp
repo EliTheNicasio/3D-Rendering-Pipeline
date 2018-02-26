@@ -35,10 +35,27 @@ typedef vec<MGLfloat,4> vec4;   //data structure storing a 4 dimensional vector,
 typedef vec<MGLfloat,3> vec3;   //data structure storing a 3 dimensional vector, see vec.h
 typedef vec<MGLfloat,2> vec2;   //data structure storing a 2 dimensional vector, see vec.h
 
-vec3 color;
-mat4 projection = {{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1}};
 MGLpoly_mode poly_mode;
+MGLmatrix_mode matrix_mode;
 
+vec3 color;
+
+mat4 Identity = {{1,0,0,0,
+                  0,1,0,0,
+                  0,0,1,0,
+                  0,0,0,1}};
+
+vector<mat4> projectionStack = {Identity};
+vector<mat4> modelviewStack = {Identity};
+
+// Stack Helper Functions
+mat4& topOfActiveMatrixStack()
+{
+    if(matrix_mode == MGL_PROJECTION)
+        return projectionStack.back();
+    else
+        return modelviewStack.back();    
+}
 
 struct Vertex
 {
@@ -76,17 +93,38 @@ MGLfloat calcArea(vec2 a, vec2 b, vec2 c)
     return a[0] * (b[1] - c[1]) + a[1] * (c[0] - b[0]) + (b[0] * c[1] - b[1] * c[0]);
 }
 
+Triangle findNPC_Coordinates(const Triangle& tri)
+{
+    Triangle t = tri;
+
+    t.A.position[0] = tri.A.position[0] / tri.A.position[3];
+    t.A.position[1] = tri.A.position[1] / tri.A.position[3];
+    t.A.position[2] = tri.A.position[2] / tri.A.position[3];
+
+    t.B.position[0] = tri.B.position[0] / tri.B.position[3];
+    t.B.position[1] = tri.B.position[1] / tri.B.position[3];
+    t.B.position[2] = tri.B.position[2] / tri.B.position[3];
+
+    t.C.position[0] = tri.C.position[0] / tri.C.position[3];
+    t.C.position[1] = tri.C.position[1] / tri.C.position[3];
+    t.C.position[2] = tri.C.position[2] / tri.C.position[3];
+
+    return t;
+}
+
 void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* data)
 {
+    Triangle t = findNPC_Coordinates(tri);
+
     vec2 a, b, c;
-    a[0] = ((tri.A.position[0] + 1) * width / 2) - .5; 
-    a[1] = ((tri.A.position[1] + 1) * height / 2) - .5; 
+    a[0] = ((t.A.position[0] + 1) * width / 2) - .5; 
+    a[1] = ((t.A.position[1] + 1) * height / 2) - .5; 
 
-    b[0] = ((tri.B.position[0] + 1) * width / 2) - .5; 
-    b[1] = ((tri.B.position[1] + 1) * height / 2) - .5; 
+    b[0] = ((t.B.position[0] + 1) * width / 2) - .5; 
+    b[1] = ((t.B.position[1] + 1) * height / 2) - .5; 
 
-    c[0] = ((tri.C.position[0] + 1) * width / 2) - .5; 
-    c[1] = ((tri.C.position[1] + 1) * height / 2) - .5; 
+    c[0] = ((t.C.position[0] + 1) * width / 2) - .5; 
+    c[1] = ((t.C.position[1] + 1) * height / 2) - .5; 
 
     for(int i = 0; i < width; i++)
     {
@@ -99,7 +137,7 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
             MGLfloat gamma = calcArea(a, b, p) / area;
 
             if(alpha >= 0 && beta >= 0 && gamma >= 0)
-                data[i+j*width] = Make_Pixel(tri.A.col[0] * 255, tri.A.col[1] * 255, tri.A.col[2] * 255);
+                data[i+j*width] = Make_Pixel(t.A.col[0] * 255, t.A.col[1] * 255, t.A.col[2] * 255);
         }
     }
 }
@@ -187,7 +225,7 @@ void mglVertex3(MGLfloat x,
                 MGLfloat z)
 {
     vec4 pos = { x, y, z, 1};
-    pos = projection * pos; 
+    pos = projectionStack.back() * modelviewStack.back() * pos; 
     
     Vertex v(0, 0, 0, 0, color);
     v.position = pos;
@@ -199,6 +237,7 @@ void mglVertex3(MGLfloat x,
  */
 void mglMatrixMode(MGLmatrix_mode mode)
 {
+    matrix_mode = mode;
 }
 
 /**
@@ -207,6 +246,10 @@ void mglMatrixMode(MGLmatrix_mode mode)
  */
 void mglPushMatrix()
 {
+    if(matrix_mode == MGL_MODELVIEW)
+        modelviewStack.push_back(modelviewStack.back());
+    else
+        projectionStack.push_back(projectionStack.back());
 }
 
 /**
@@ -215,6 +258,10 @@ void mglPushMatrix()
  */
 void mglPopMatrix()
 {
+    if(matrix_mode == MGL_MODELVIEW)
+        modelviewStack.pop_back();
+    else
+        projectionStack.pop_back();
 }
 
 /**
@@ -222,6 +269,8 @@ void mglPopMatrix()
  */
 void mglLoadIdentity()
 {
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = Identity;
 }
 
 /**
@@ -264,6 +313,13 @@ void mglTranslate(MGLfloat x,
                   MGLfloat y,
                   MGLfloat z)
 {
+    mat4 temp_matrix = {{1, 0, 0, 0,
+                         0, 1, 0, 0,
+                         0, 0, 1, 0,
+                         x, y, z, 1}};
+
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = currentM * temp_matrix; 
 }
 
 /**
@@ -276,6 +332,28 @@ void mglRotate(MGLfloat angle,
                MGLfloat y,
                MGLfloat z)
 {
+    vec3 v = {x, y, z};
+    v = v.normalized();
+
+    double radAngle = (angle * M_PI) / 180;
+    MGLfloat c = cos(radAngle), s = sin(radAngle);
+
+    mat4 temp_matrix = {{v[0] * v[0] * (1 - c) + c, 
+                         v[0] * v[1] * (1 - c) + v[2] * s,
+                         v[0] * v[2] * (1 - c) - v[1] * s, 
+                         0,
+                         v[0] * v[1] * (1 - c) - v[2] * s,
+                         v[1] * v[1] * (1 - c) + c,
+                         v[1] * v[2] * (1 - c) + v[0] * s,
+                         0,
+                         v[0] * v[2] * (1 - c) + v[1] * s,
+                         v[1] * v[2] * (1 - c) - v[0] * s,
+                         v[2] * v[2] * (1 - c) + c,
+                         0,
+                         0, 0, 0, 1}};	 
+
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = currentM * temp_matrix; 
 }
 
 /**
@@ -286,6 +364,13 @@ void mglScale(MGLfloat x,
               MGLfloat y,
               MGLfloat z)
 {
+    mat4 temp_matrix = {{x, 0, 0, 0,
+                         0, y, 0, 0,
+                         0, 0, z, 0,
+                         0, 0, 0, 1}};
+ 
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = currentM * temp_matrix; 
 }
 
 /**
@@ -299,6 +384,18 @@ void mglFrustum(MGLfloat left,
                 MGLfloat near,
                 MGLfloat far)
 {
+    MGLfloat A, B, C, D;
+    A = (right + left) / (right - left);
+    B = (top + bottom) / (top - bottom);
+    C = (far + near) / (far - near);
+    D = (2 * far * near) / (far - near);
+
+    mat4 temp_matrix = {{ (2 * near) / (right - left), 0, 0, 0, 
+                          0, (2 * near) / (top - bottom), 0, 0, 
+                          A, B, C, -1, 
+                          0, 0, D, 0}};
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = currentM * temp_matrix; 
 }
 
 /**
@@ -317,9 +414,12 @@ void mglOrtho(MGLfloat left,
     t_y = -1 * (top + bottom) / (top - bottom);
     t_z = -1 * (far + near) / (far - near);
 
-    mat4 temp_matrix = {{ 2 / (right - left), 0, 0, 0, 0, 2 / (top - bottom), 0, 0, 0, 
-                          0, -2 / (far - near), 0, t_x, t_y, t_z, 1}};
-    projection = temp_matrix;   
+    mat4 temp_matrix = {{ 2 / (right - left), 0, 0, 0, 
+                          0, 2 / (top - bottom), 0, 0, 
+                          0, 0, -2 / (far - near), 0, 
+                          t_x, t_y, t_z, 1}};
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = currentM * temp_matrix; 
 }
 
 /**
