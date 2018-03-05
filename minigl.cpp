@@ -48,6 +48,8 @@ mat4 Identity = {{1,0,0,0,
 vector<mat4> projectionStack = {Identity};
 vector<mat4> modelviewStack = {Identity};
 
+vector<vector<MGLfloat>> min_zBulk;
+
 // Stack Helper Functions
 mat4& topOfActiveMatrixStack()
 {
@@ -137,7 +139,20 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
             MGLfloat gamma = calcArea(a, b, p) / area;
 
             if(alpha >= 0 && beta >= 0 && gamma >= 0)
-                data[i+j*width] = Make_Pixel(t.A.col[0] * 255, t.A.col[1] * 255, t.A.col[2] * 255);
+            {
+                MGLfloat z_depth = alpha * t.A.position[2] + beta * t.B.position[2]
+                                   + gamma * t.C.position[2];
+                if(z_depth < min_zBulk[i][j])
+                {
+                    // Fix for perspective correct color interpolation
+                    data[i+j*width] = Make_Pixel(
+                        255 * (t.A.col[0] * alpha + t.B.col[0] * beta + t.C.col[0] * gamma), 
+                        255 * (t.A.col[1] * alpha + t.B.col[1] * beta + t.C.col[1] * gamma),
+                        255 * (t.A.col[2] * alpha + t.B.col[2] * beta + t.C.col[2] * gamma)
+                                                );
+                    min_zBulk[i][j] = z_depth;
+                }
+            }
         }
     }
 }
@@ -160,6 +175,16 @@ void mglReadPixels(MGLsize width,
                    MGLpixel *data)
 {
     Make_Pixel(0, 0, 0);
+    
+    // Allocate size
+    min_zBulk.resize(width);
+    for(size_t i = 0; i < width; i++)
+        min_zBulk[i].resize(height);
+
+    // Initialize
+    for(size_t i = 0; i < width; i++)
+        for(size_t j = 0; j < height; j++)
+            min_zBulk[i][j] = 2;
 
     for(size_t i = 0; i < triangles.size(); i++)
        Rasterize_Triangle(triangles[i], width, height, data);
@@ -287,6 +312,13 @@ void mglLoadIdentity()
  */
 void mglLoadMatrix(const MGLfloat *matrix)
 {
+    mat4 tempM;
+
+    for(int i = 0; i < 16; i++)
+       tempM.values[i] = matrix[i];
+
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = tempM;    
 }
 
 /**
@@ -303,6 +335,13 @@ void mglLoadMatrix(const MGLfloat *matrix)
  */
 void mglMultMatrix(const MGLfloat *matrix)
 {
+    mat4 tempM;
+
+    for(int i = 0; i < 16; i++)
+       tempM.values[i] = matrix[i];
+
+    mat4& currentM = topOfActiveMatrixStack();
+    currentM = currentM * tempM;    
 }
 
 /**
