@@ -114,6 +114,39 @@ Triangle findNPC_Coordinates(const Triangle& tri)
     return t;
 }
 
+bool isInClippingBox(const Triangle& t)
+{
+    return 
+           (t.A.position[0] >= -1 && t.A.position[0] <= 1) &&
+           (t.A.position[1] >= -1 && t.A.position[1] <= 1) &&
+           (t.A.position[2] >= -1 && t.A.position[2] <= 1) &&
+
+           (t.B.position[0] >= -1 && t.B.position[0] <= 1) &&
+           (t.B.position[1] >= -1 && t.B.position[1] <= 1) &&
+           (t.B.position[2] >= -1 && t.B.position[2] <= 1) &&
+
+           (t.C.position[0] >= -1 && t.C.position[0] <= 1) &&
+           (t.C.position[1] >= -1 && t.C.position[1] <= 1) &&
+           (t.C.position[2] >= -1 && t.C.position[2] <= 1);
+}
+
+// Calculates perspective correct color interpolation, based on input, 
+// index, which is alpha, beta or gamma
+vector<MGLfloat> getColors(MGLfloat alpha, MGLfloat beta,  MGLfloat gamma, Triangle t)
+{
+    vector<MGLfloat> colors;
+
+    MGLfloat div = (alpha / t.A.position[3]) 
+                    + (beta / t.B.position[3]) 
+                    + (gamma / t.C.position[3]);
+    
+    colors.push_back((alpha / t.A.position[3]) / div);
+    colors.push_back((beta / t.B.position[3]) / div);
+    colors.push_back((gamma / t.C.position[3]) / div);
+    
+    return colors;
+}
+
 void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* data)
 {
     Triangle t = findNPC_Coordinates(tri);
@@ -128,9 +161,9 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
     c[0] = ((t.C.position[0] + 1) * width / 2) - .5; 
     c[1] = ((t.C.position[1] + 1) * height / 2) - .5; 
 
-    for(int i = 0; i < width; i++)
+    for(int i = 0; i < width; ++i)
     {
-        for(int j = 0; j < height; j++)
+        for(int j = 0; j < height; ++j)
         {
             vec2 p = {i, j};
             MGLfloat area = calcArea(a, b, c);
@@ -138,20 +171,27 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
             MGLfloat beta = calcArea(a, p, c) / area;
             MGLfloat gamma = calcArea(a, b, p) / area;
 
+//            if(isInClippingBox(t))
+            {
             if(alpha >= 0 && beta >= 0 && gamma >= 0)
             {
                 MGLfloat z_depth = alpha * t.A.position[2] + beta * t.B.position[2]
                                    + gamma * t.C.position[2];
-                if(z_depth < min_zBulk[i][j])
+                if(z_depth <= 1 && z_depth >= -1)
                 {
-                    // Fix for perspective correct color interpolation
-                    data[i+j*width] = Make_Pixel(
-                        255 * (t.A.col[0] * alpha + t.B.col[0] * beta + t.C.col[0] * gamma), 
-                        255 * (t.A.col[1] * alpha + t.B.col[1] * beta + t.C.col[1] * gamma),
-                        255 * (t.A.col[2] * alpha + t.B.col[2] * beta + t.C.col[2] * gamma)
-                                                );
-                    min_zBulk[i][j] = z_depth;
+                    if(z_depth < min_zBulk[i][j])
+                    {
+                        vector<MGLfloat> colors = getColors(alpha, beta, gamma, t);
+                        MGLfloat r = t.A.col[0] * colors[0] + t.B.col[0] * colors[1] + t.C.col[0] * colors[2];
+                        MGLfloat g = t.A.col[1] * colors[0] + t.B.col[1] * colors[1] + t.C.col[1] * colors[2];
+                        MGLfloat b = t.A.col[2] * colors[0] + t.B.col[2] * colors[1] + t.C.col[2] * colors[2];
+
+                        // Fix for perspective correct color interpolation
+                        data[i+j*width] = Make_Pixel(255 * r, 255 * g, 255 * b);
+                        min_zBulk[i][j] = z_depth;
+                    }
                 }
+            }
             }
         }
     }
