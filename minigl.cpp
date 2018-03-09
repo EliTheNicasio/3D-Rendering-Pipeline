@@ -117,19 +117,21 @@ Triangle findNPC_Coordinates(const Triangle& tri)
 bool isInClippingBox(const Triangle& t)
 {
     return 
-           (t.A.position[0] >= -1 && t.A.position[0] <= 1) &&
-           (t.A.position[1] >= -1 && t.A.position[1] <= 1) &&
-           (t.A.position[2] >= -1 && t.A.position[2] <= 1) &&
+           ((t.A.position[3] >= 0 && t.A.position[0] <= t.A.position[3]) ||
+           (t.A.position[3] <= 0 && t.A.position[0] >= t.A.position[3])) &&
+           ((t.A.position[3] >= 0 && t.A.position[0] <= t.A.position[3]) ||
+           (t.A.position[3] <= 0 && t.A.position[0] >= t.A.position[3])) &&
 
-           (t.B.position[0] >= -1 && t.B.position[0] <= 1) &&
-           (t.B.position[1] >= -1 && t.B.position[1] <= 1) &&
-           (t.B.position[2] >= -1 && t.B.position[2] <= 1) &&
-
-           (t.C.position[0] >= -1 && t.C.position[0] <= 1) &&
-           (t.C.position[1] >= -1 && t.C.position[1] <= 1) &&
-           (t.C.position[2] >= -1 && t.C.position[2] <= 1);
+           ((t.A.position[3] >= 0 && t.A.position[0] <= t.A.position[3]) ||
+           (t.A.position[3] <= 0 && t.A.position[0] >= t.A.position[3])) &&
+           ((t.A.position[3] >= 0 && t.A.position[0] <= t.A.position[3]) ||
+           (t.A.position[3] <= 0 && t.A.position[0] >= t.A.position[3])) &&
+ 
+           ((t.A.position[3] >= 0 && t.A.position[0] <= t.A.position[3]) ||
+           (t.A.position[3] <= 0 && t.A.position[0] >= t.A.position[3])) &&
+           ((t.A.position[3] >= 0 && t.A.position[0] <= t.A.position[3]) ||
+           (t.A.position[3] <= 0 && t.A.position[0] >= t.A.position[3]));
 }
-
 // Calculates perspective correct color interpolation, based on input, 
 // index, which is alpha, beta or gamma
 vector<MGLfloat> getColors(MGLfloat alpha, MGLfloat beta,  MGLfloat gamma, Triangle t)
@@ -150,7 +152,7 @@ vector<MGLfloat> getColors(MGLfloat alpha, MGLfloat beta,  MGLfloat gamma, Trian
 void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* data)
 {
     Triangle t = findNPC_Coordinates(tri);
-
+    
     vec2 a, b, c;
     a[0] = ((t.A.position[0] + 1) * width / 2) - .5; 
     a[1] = ((t.A.position[1] + 1) * height / 2) - .5; 
@@ -161,9 +163,28 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
     c[0] = ((t.C.position[0] + 1) * width / 2) - .5; 
     c[1] = ((t.C.position[1] + 1) * height / 2) - .5; 
 
-    for(int i = 0; i < width; ++i)
+    MGLfloat div, alphaInter, betaInter, gammaInter, red, green, blue;
+
+    // Bounding box, to make test 25 faster
+    int xMin = min(a[0], b[0]), 
+        xMax = max(a[0], b[0]), 
+        yMin = min(a[1], b[1]), 
+        yMax = max(a[1], b[1]);
+    xMin = min(xMin, static_cast<int>(c[0]));
+    xMax = max(xMax, static_cast<int>(c[0]));
+    yMin = min(yMin, static_cast<int>(c[1]));
+    yMax = max(yMax, static_cast<int>(c[1]));
+      
+    //std::cout << xMin << " " << xMax << " " << yMin << " " << yMax << std::endl;
+  //  std::cout << a[0] << " " << a[1] << " " << b[0] << " " << b[1] << " " << c[0] << " " << c[1] << std::endl;
+    
+    int iMin = max(xMin, 0), iMax = min(width - 1, xMax), 
+        jMin = max(yMin, 0), jMax = min(height - 1, yMax);
+
+    //std::cout << iMin << " " << iMax << " " << jMin << " " << jMax << std::endl;
+    for(int i = iMin; i <= iMax; ++i)
     {
-        for(int j = 0; j < height; ++j)
+        for(int j = jMin; j <= jMax; ++j)
         {
             vec2 p = {i, j};
             MGLfloat area = calcArea(a, b, c);
@@ -171,7 +192,7 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
             MGLfloat beta = calcArea(a, p, c) / area;
             MGLfloat gamma = calcArea(a, b, p) / area;
 
-//            if(isInClippingBox(t))
+           // if(isInClippingBox(tri))
             {
             if(alpha >= 0 && beta >= 0 && gamma >= 0)
             {
@@ -181,13 +202,27 @@ void Rasterize_Triangle(const Triangle& tri, int width, int height, MGLpixel* da
                 {
                     if(z_depth < min_zBulk[i][j])
                     {
-                        vector<MGLfloat> colors = getColors(alpha, beta, gamma, t);
-                        MGLfloat r = t.A.col[0] * colors[0] + t.B.col[0] * colors[1] + t.C.col[0] * colors[2];
-                        MGLfloat g = t.A.col[1] * colors[0] + t.B.col[1] * colors[1] + t.C.col[1] * colors[2];
-                        MGLfloat b = t.A.col[2] * colors[0] + t.B.col[2] * colors[1] + t.C.col[2] * colors[2];
+                        div = (alpha / t.A.position[3]) 
+                                        + (beta / t.B.position[3]) 
+                                        + (gamma / t.C.position[3]);
+    
+                        alphaInter = ((alpha / t.A.position[3]) / div);
+                        betaInter = ((beta / t.B.position[3]) / div);
+                        gammaInter = ((gamma / t.C.position[3]) / div);
+                       
+                        red = t.A.col[0] * alphaInter 
+                                     + t.B.col[0] * betaInter 
+                                     + t.C.col[0] * gammaInter;
+                        green = t.A.col[1] * alphaInter 
+                                     + t.B.col[1] * betaInter 
+                                     + t.C.col[1] * gammaInter;
+                        blue = t.A.col[2] * alphaInter 
+                                     + t.B.col[2] * betaInter 
+                                     + t.C.col[2] * gammaInter;
 
                         // Fix for perspective correct color interpolation
-                        data[i+j*width] = Make_Pixel(255 * r, 255 * g, 255 * b);
+            //            if(red != 0 && green != 0 && blue != 0)
+                            data[i+j*width] = Make_Pixel(255 * red, 255 * green, 255 * blue);
                         min_zBulk[i][j] = z_depth;
                     }
                 }
